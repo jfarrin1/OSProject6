@@ -1,4 +1,3 @@
-
 #include "fs.h"
 #include "disk.h"
 #include <math.h>
@@ -135,6 +134,7 @@ void fs_debug()
 
 int fs_mount()
 {
+	if(!isMounted){
 	int i,j,k;
 	union fs_block block;
 	disk_read(0,block.data);
@@ -180,11 +180,38 @@ int fs_mount()
 	} else {
 		return 0;
 	}
+	}
+	return 0;
 }
 
 int fs_create()
 {
-	return 0;
+	int i;
+	if(isMounted ==0){
+		union fs_block block;
+		disk_read(0,block.data);
+		int numInodes = block.super.ninodes;
+		struct fs_inode blank_inode;
+		blank_inode.isvalid = 1;
+		blank_inode.size = 0;
+		for(i=0;i<5;i++){
+			blank_inode.direct[i] = 0;
+		}
+		blank_inode.indirect = 0;
+		//find free inode
+		for(i=1; i<numInodes; i++){
+			if(inodeBitmap[i] == 0){
+				int iBlock = i/127+1;
+				int index = i%127;
+				disk_read(iBlock, block.data);
+				block.inode[index] = blank_inode;
+				inodeBitmap[i] = 1;
+				disk_write(iBlock,block.data);
+				return 1;
+			}
+		}
+	}
+	return 0; //return 0 if not mounted or if no free inodes
 }
 
 int fs_delete( int inumber )
@@ -195,10 +222,6 @@ int fs_delete( int inumber )
 	union fs_block block;
 	disk_read(iBlock,block.data);
 	if(block.inode[index].isvalid){
-		//empty Char array block
-		char emptyChar[DISK_BLOCK_SIZE] = "";
-		union fs_block resetBlock;
-		strcpy(resetBlock.data,emptyChar);
 		//empty inode block
 		struct fs_inode blank_inode;
 		blank_inode.isvalid = 0;
@@ -219,28 +242,23 @@ int fs_delete( int inumber )
 		}
 		for(k=0; k<numDirect; k++){
 			currBlock = block.inode[index].direct[k];
-			printf("currblock = %d\n",currBlock);
-			disk_write(currBlock,resetBlock.data);
 			blockBitmap[currBlock] = 0;
-			printf("made it\n");
 		}
 		if(numIndirect){
 			disk_read(block.inode[index].indirect,block.data);
 		}
 		for(k=0; k<numIndirect; k++){
 			currBlock = block.pointers[k];
-			disk_write(currBlock,resetBlock.data);
 			blockBitmap[currBlock] = 0;
-			printf("e\n");
 		}
 		if(numIndirect){
 			disk_read(iBlock,block.data);
+			blockBitmap[block.inode[index].indirect] = 0;
 		}
 		//delte inode
 		block.inode[index] = blank_inode;
 		disk_write(iBlock, block.data);
 		inodeBitmap[inumber] = 0;
-		printf("llo\n");
 		return 1;
 	} else {
 		return 0;
