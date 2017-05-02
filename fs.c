@@ -13,6 +13,11 @@
 #define POINTERS_PER_INODE 5
 #define POINTERS_PER_BLOCK 1024
 
+//global flags
+int isMounted = 0;
+int* inodeBitmap;
+int* blockBitmap;
+
 struct fs_superblock {
 	int magic;
 	int nblocks;
@@ -36,6 +41,9 @@ union fs_block {
 
 int fs_format()
 {
+	if (isMounted){
+		return 0;
+	} else {
 	union fs_block block;
 	disk_read(0,block.data);
 
@@ -71,6 +79,7 @@ int fs_format()
 	disk_write(0,superman.data);
 
 	return 1;
+	}
 }
 
 void fs_debug()
@@ -125,17 +134,51 @@ void fs_debug()
 
 int fs_mount()
 {
-	/*
-		check isValid, continue if it is
-		look at size, and do size/4096 to see how much data is in the inode
-		always round up on the size to get # blocks
-		only read exact amount of data from disk block #
-		so if there is size 40961 size, then read 4096 from block 1 and 1 from block 2
-		if # blocks>5 then there is stuff in indirect
-		again read only what you need from the idrection block 
-	*/
-
-	return 0;
+	int i,j,k;
+	union fs_block block;
+	disk_read(0,block.data);
+	if(block.super.magic == FS_MAGIC){
+		isMounted = 1;
+		inodeBitmap = malloc(block.super.ninodes * sizeof(int));
+		blockBitmap = malloc(block.super.nblocks * sizeof(int));
+		for(k=0; k<block.super.nblocks;k++){
+			blockBitmap[k] = 0;
+		}
+		blockBitmap[0] =1; //superblock
+		int numInodeBlocks = block.super.ninodeblocks;
+		for(j=1; j<=numInodeBlocks; j++){
+			disk_read(j,block.data);
+			for(i=0; i<128; i++){
+				if(block.inode[i].isvalid ==1){
+					inodeBitmap[i+128*(j-1)] = 1;
+					int numBlocks = ceil((double)block.inode[i].size/(double)4096);
+					int numDirect = numBlocks;
+					int numIndirect = 0;
+					if (numBlocks>5){
+						numDirect= 5;
+						numIndirect = numBlocks-5;
+					}
+					for(k=0; k<numDirect; k++){
+						blockBitmap[block.inode[i].direct[k]] = 1;
+					}
+					if(numIndirect){
+						disk_read(block.inode[i].indirect,block.data);
+					}
+					for(k=0; k<numIndirect; k++){
+						blockBitmap[block.pointers[k]] = 1;
+					}
+					if(numIndirect){
+						disk_read(j,block.data);
+					}
+				} else {
+					inodeBitmap[i+128*(j-1)] = 0;
+				}
+			}
+		}
+		return 1;
+	} else {
+		return 0;
+	}
 }
 
 int fs_create()
