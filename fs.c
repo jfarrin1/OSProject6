@@ -8,6 +8,7 @@
 #include <errno.h>
 #include <unistd.h>
 
+
 #define FS_MAGIC           0xf0f03410
 #define INODES_PER_BLOCK   128
 #define POINTERS_PER_INODE 5
@@ -195,9 +196,9 @@ int fs_delete( int inumber )
 	disk_read(iBlock,block.data);
 	if(block.inode[index].isvalid){
 		//empty Char array block
-		char emptyChar[DISK_BLOCK_SIZE];
+		char emptyChar[DISK_BLOCK_SIZE] = "";
 		union fs_block resetBlock;
-		resetBlock.data = emptyChar[0];
+		strcpy(resetBlock.data,emptyChar);
 		//empty inode block
 		struct fs_inode blank_inode;
 		blank_inode.isvalid = 0;
@@ -218,8 +219,10 @@ int fs_delete( int inumber )
 		}
 		for(k=0; k<numDirect; k++){
 			currBlock = block.inode[index].direct[k];
+			printf("currblock = %d\n",currBlock);
 			disk_write(currBlock,resetBlock.data);
 			blockBitmap[currBlock] = 0;
+			printf("made it\n");
 		}
 		if(numIndirect){
 			disk_read(block.inode[index].indirect,block.data);
@@ -228,6 +231,7 @@ int fs_delete( int inumber )
 			currBlock = block.pointers[k];
 			disk_write(currBlock,resetBlock.data);
 			blockBitmap[currBlock] = 0;
+			printf("e\n");
 		}
 		if(numIndirect){
 			disk_read(iBlock,block.data);
@@ -236,6 +240,7 @@ int fs_delete( int inumber )
 		block.inode[index] = blank_inode;
 		disk_write(iBlock, block.data);
 		inodeBitmap[inumber] = 0;
+		printf("llo\n");
 		return 1;
 	} else {
 		return 0;
@@ -244,7 +249,17 @@ int fs_delete( int inumber )
 
 int fs_getsize( int inumber )
 {
-	return -1;
+	int block_num = inumber/127 + 1;
+	union fs_block block;
+	disk_read(block_num, block.data);
+	int index = inumber%127;
+	if(block.inode[index].isvalid){
+		int size = block.inode[index].size;
+		return size;
+	}
+	else{
+		return -1;
+	}
 }
 
 int fs_read( int inumber, char *data, int length, int offset )
