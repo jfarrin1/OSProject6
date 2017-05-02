@@ -188,7 +188,58 @@ int fs_create()
 
 int fs_delete( int inumber )
 {
-	return 0;
+	int iBlock = inumber/127 +1;
+	int i,k;
+	int index = inumber%127;
+	union fs_block block;
+	disk_read(iBlock,block.data);
+	if(block.inode[index].isvalid){
+		//empty Char array block
+		char emptyChar[DISK_BLOCK_SIZE];
+		union fs_block resetBlock;
+		resetBlock.data = emptyChar[0];
+		//empty inode block
+		struct fs_inode blank_inode;
+		blank_inode.isvalid = 0;
+		blank_inode.size = 0;
+		for(i=0;i<5;i++)
+		{
+			blank_inode.direct[i] = 0;
+		}
+		blank_inode.indirect = 0;
+		int currBlock;
+		//release all data and change bitmap
+		int numBlocks = ceil((double)block.inode[index].size/(double)4096);
+		int numDirect = numBlocks;
+		int numIndirect = 0;
+		if (numBlocks>5){
+			numDirect= 5;
+			numIndirect = numBlocks-5;
+		}
+		for(k=0; k<numDirect; k++){
+			currBlock = block.inode[index].direct[k];
+			disk_write(currBlock,resetBlock.data);
+			blockBitmap[currBlock] = 0;
+		}
+		if(numIndirect){
+			disk_read(block.inode[index].indirect,block.data);
+		}
+		for(k=0; k<numIndirect; k++){
+			currBlock = block.pointers[k];
+			disk_write(currBlock,resetBlock.data);
+			blockBitmap[currBlock] = 0;
+		}
+		if(numIndirect){
+			disk_read(iBlock,block.data);
+		}
+		//delte inode
+		block.inode[index] = blank_inode;
+		disk_write(iBlock, block.data);
+		inodeBitmap[inumber] = 0;
+		return 1;
+	} else {
+		return 0;
+	}
 }
 
 int fs_getsize( int inumber )
