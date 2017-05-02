@@ -286,7 +286,61 @@ int fs_getsize( int inumber )
 
 int fs_read( int inumber, char *data, int length, int offset )
 {
-	return 0;
+	int iBlock = inumber/127 +1;
+	int index = inumber%127;
+	int endBlock,numDirect=0, numIndirect=0;
+	int i,count=0, readSize;
+	int startBlock = offset/DISK_BLOCK_SIZE;
+	int remainder = offset%DISK_BLOCK_SIZE;
+	union fs_block block;
+	union fs_block tempBlock;
+	union fs_block indBlock;
+	disk_read(iBlock,block.data);
+	if(block.inode[index].isvalid){
+		if(offset > block.inode[index].size) return 0;
+		int endPoint = length+offset;
+		if (endPoint > block.inode[index].size){
+			endPoint = block.inode[index].size;
+		}
+		endBlock = ceil((double)endPoint/(double)DISK_BLOCK_SIZE);
+		printf("start: %d	end: %d	",startBlock,endBlock);
+		if(startBlock >=5){
+			numIndirect = endBlock;
+		} else if(endBlock > POINTERS_PER_INODE){
+			numDirect = POINTERS_PER_INODE;
+			numIndirect = endBlock-numDirect;
+		} else {
+			numDirect = endBlock;
+		}
+		printf("direct end: %d	indirect end: %d",numDirect, numIndirect);
+		for(i=startBlock; i<=numDirect; i++){
+			if(i==endBlock){
+				readSize = remainder;
+			} else {
+				readSize = DISK_BLOCK_SIZE;
+			}
+			disk_read(block.inode[index].direct[i],tempBlock.data);
+			memcpy(data+index,tempBlock.data, readSize);
+			count += readSize;
+		}
+		if(numIndirect){
+			disk_read(block.inode[index].indirect, indBlock.data);
+		}
+		for(i=0; i<=numIndirect; i++){
+			if(i==endBlock){
+				readSize = remainder;
+			} else {
+				readSize = DISK_BLOCK_SIZE;
+			}
+			disk_read(indBlock.pointers[i],tempBlock.data);
+			memcpy(data+index,tempBlock.data, readSize);
+			count += readSize;
+		}
+		return 1;
+	} else {
+		printf("not valid\n");
+		return 0;
+	}
 }
 
 int fs_write( int inumber, const char *data, int length, int offset )
