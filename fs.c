@@ -1,7 +1,7 @@
 
 #include "fs.h"
 #include "disk.h"
-
+#include <math.h>
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
@@ -43,16 +43,63 @@ void fs_debug()
 {
 	union fs_block block;
 
+	int size = disk_size();
 	disk_read(0,block.data);
+	int numInodes = block.super.ninodeblocks;
 
 	printf("superblock:\n");
+	printf("    %d magic\n",block.super.magic);
 	printf("    %d blocks\n",block.super.nblocks);
 	printf("    %d inode blocks\n",block.super.ninodeblocks);
 	printf("    %d inodes\n",block.super.ninodes);
+	int i,j,k;
+	for(j=1; j<=numInodes; j++){
+		disk_read(j,block.data);
+		for(i=0; i<128; i++){
+			if(block.inode[i].isvalid ==1){
+				printf("inode: %d\n",i);
+				printf("    size: %d bytes\n",block.inode[i].size);
+				int numBlocks = ceil((double)block.inode[i].size/(double)4096);
+				int numDirect = numBlocks;
+				int numIndirect = 0;
+				if (numBlocks>5){
+					numDirect= 5;
+					numIndirect = numBlocks-5;
+				}
+				printf("	direct blocks:");
+				for(k=0; k<numDirect; k++){
+					printf(" %d",block.inode[i].direct[k]);
+					if(k==numDirect-1) printf("\n");
+				}
+				if(numIndirect){
+					printf("	indirect block: %d\n", block.inode[i].indirect);
+					printf("	indirect data blocks:");
+					disk_read(block.inode[i].indirect,block.data);
+				}
+				for(k=0; k<numIndirect; k++){
+					printf(" %d",block.pointers[k]);
+					if(k==numIndirect-1) printf("\n");
+				}
+				if(numIndirect){
+					disk_read(j,block.data);
+				}
+			}
+		}
+	}
 }
 
 int fs_mount()
 {
+	/*
+		check isValid, continue if it is
+		look at size, and do size/4096 to see how much data is in the inode
+		always round up on the size to get # blocks
+		only read exact amount of data from disk block #
+		so if there is size 40961 size, then read 4096 from block 1 and 1 from block 2
+		if # blocks>5 then there is stuff in indirect
+		again read only what you need from the idrection block 
+	*/
+
 	return 0;
 }
 
