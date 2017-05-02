@@ -48,7 +48,9 @@ void fs_debug()
 	int numInodes = block.super.ninodeblocks;
 
 	printf("superblock:\n");
-	printf("    %d magic\n",block.super.magic);
+	if(block.super.magic == FS_MAGIC){
+		printf("	magic number is legit\n");
+	}
 	printf("    %d blocks\n",block.super.nblocks);
 	printf("    %d inode blocks\n",block.super.ninodeblocks);
 	printf("    %d inodes\n",block.super.ninodes);
