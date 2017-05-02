@@ -286,61 +286,80 @@ int fs_getsize( int inumber )
 
 int fs_read( int inumber, char *data, int length, int offset )
 {
-	int iBlock = inumber/127 +1;
-	int index = inumber%127;
-	int endBlock,numDirect=0, numIndirect=0;
-	int i,count=0, readSize;
-	int startBlock = offset/DISK_BLOCK_SIZE;
-	int remainder = offset%DISK_BLOCK_SIZE;
+	int block_num = inumber/127 + 1;
+	printf("inode is in block: %d\n",block_num);
 	union fs_block block;
-	union fs_block tempBlock;
-	union fs_block indBlock;
-	disk_read(iBlock,block.data);
-	if(block.inode[index].isvalid){
-		if(offset > block.inode[index].size) return 0;
-		int endPoint = length+offset;
-		if (endPoint > block.inode[index].size){
-			endPoint = block.inode[index].size;
+	disk_read(block_num,block.data);
+	int index = inumber%127;
+	int currBlock,i,bytesWeCanRead;
+	int count=0;
+	int bytesToRead;
+	int blockOffset = offset/4096; //# of blocks to skip
+	printf("Offset is: %d\n",offset);
+	printf("Due to offset we will skip: %d block(s)\n",blockOffset);
+	int blockReadOffsetIndex = offset%4096;
+	printf("Due to offset, index will start at: %d\n",blockReadOffsetIndex);
+	int totalBlocksOffset=0;
+
+	if(block.inode[index].isvalid == 1)
+	{
+		int numBlocks = ceil((double)block.inode[index].size/(double)4096);
+		int numDirect = numBlocks;
+		int numIndirect = 0;
+		if(numBlocks > 5)
+		{
+			numDirect = 5;
+			numIndirect = numBlocks -5;
 		}
-		endBlock = ceil((double)endPoint/(double)DISK_BLOCK_SIZE);
-		printf("start: %d	end: %d	",startBlock,endBlock);
-		if(startBlock >=5){
-			numIndirect = endBlock;
-		} else if(endBlock > POINTERS_PER_INODE){
-			numDirect = POINTERS_PER_INODE;
-			numIndirect = endBlock-numDirect;
-		} else {
-			numDirect = endBlock;
-		}
-		printf("direct end: %d	indirect end: %d",numDirect, numIndirect);
-		for(i=startBlock; i<=numDirect; i++){
-			if(i==endBlock){
-				readSize = remainder;
-			} else {
-				readSize = DISK_BLOCK_SIZE;
+		printf("Number of Direct Blocks = %d\n",numDirect);
+		//go through direct blocks
+		for(i=0;i<numDirect;i++)
+		{
+			disk_read(block_num,block.data);
+			currBlock = block.inode[index].direct[i];
+			printf("Going to direct data block: %d\n",currBlock);
+			disk_read(currBlock,block.data);
+			if(blockOffset > i)
+			{
+				printf("Skipping block %d due to offset\n",currBlock);
+				totalBlocksOffset++;
 			}
-			disk_read(block.inode[index].direct[i],tempBlock.data);
-			memcpy(data+index,tempBlock.data, readSize);
-			count += readSize;
-		}
-		if(numIndirect){
-			disk_read(block.inode[index].indirect, indBlock.data);
-		}
-		for(i=0; i<=numIndirect; i++){
-			if(i==endBlock){
-				readSize = remainder;
-			} else {
-				readSize = DISK_BLOCK_SIZE;
+			else
+			{
+				if(blockOffset == i)
+				{
+					printf("Done skipping blocks, going to read block: %d\n",currBlock);
+					bytesWeCanRead = 4096-blockReadOffsetIndex;
+					bytesToRead = length- count;
+					printf("We can read %d bytes from this block\n",bytesWeCanRead);
+					if(bytesToRead >= bytesWeCanRead)
+					{
+						bytesToRead = bytesWeCanRead;
+					}
+					printf("We will read %d bytes from this block\n",bytesToRead);
+					memcpy(data+count, block.data+blockReadOffsetIndex,bytesToRead);
+					count += bytesToRead;
+					printf("Total bytes read: %d\n",count);
+				}
+				else
+				{
+					printf("Done with offset, going to read block: %d\n",currBlock);
+					bytesToRead = length-count;
+					if(bytesToRead >= 4096)
+					{
+						bytesToRead = 4096;
+					}
+					printf("We will read %d bytes from this block\n",bytesToRead);
+					memcpy(data+count,block.data,bytesToRead);
+					count+= bytesToRead;
+					printf("Total bytes read: %d\n",count);
+
+				}
 			}
-			disk_read(indBlock.pointers[i],tempBlock.data);
-			memcpy(data+index,tempBlock.data, readSize);
-			count += readSize;
 		}
-		return 1;
-	} else {
-		printf("not valid\n");
-		return 0;
-	}
+		return count;
+	} //done reading inodes
+	return 0;
 }
 
 int fs_write( int inumber, const char *data, int length, int offset )
