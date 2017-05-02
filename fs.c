@@ -36,20 +36,53 @@ union fs_block {
 
 int fs_format()
 {
-	return 0;
+	union fs_block block;
+	disk_read(0,block.data);
+
+	int size = disk_size();
+	int nInodes = ceil((double)size/(double)10);
+	int oldnInodes = block.super.ninodeblocks;
+
+	//clear inodes
+	int i;
+	union fs_block blank;
+	struct fs_inode blank_inode;
+	blank_inode.isvalid = 0;
+	blank_inode.size = 0;
+	for(i=0;i<5;i++)
+	{
+		blank_inode.direct[i] = 0;
+	}
+	blank_inode.indirect = 0;
+	for(i=0;i<128;i++)
+	{
+		blank.inode[i] = blank_inode;
+	}
+	for(i=1;i<=oldnInodes;i++)
+	{
+		disk_write(1,blank.data);
+	}
+	//change superblock
+	union fs_block superman;
+	superman.super.magic = FS_MAGIC;
+	superman.super.nblocks = size;
+	superman.super.ninodeblocks = nInodes;
+	superman.super.ninodes = nInodes * 128;
+	disk_write(0,superman.data);
+
+	return 1;
 }
 
 void fs_debug()
 {
 	union fs_block block;
 
-	int size = disk_size();
 	disk_read(0,block.data);
 	int numInodes = block.super.ninodeblocks;
 
 	printf("superblock:\n");
 	if(block.super.magic == FS_MAGIC){
-		printf("	magic number is legit\n");
+		printf("    magic number is legit\n");
 	}
 	printf("    %d blocks\n",block.super.nblocks);
 	printf("    %d inode blocks\n",block.super.ninodeblocks);
