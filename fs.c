@@ -111,6 +111,7 @@ void fs_debug()
 					numIndirect = numBlocks-5;
 				}
 				printf("	direct blocks:");
+				if(numDirect ==0) printf("\n");
 				for(k=0; k<numDirect; k++){
 					printf(" %d",block.inode[i].direct[k]);
 					if(k==numDirect-1) printf("\n");
@@ -187,7 +188,7 @@ int fs_mount()
 int fs_create()
 {
 	int i;
-	if(isMounted ==0){
+	if(isMounted){
 		union fs_block block;
 		disk_read(0,block.data);
 		int numInodes = block.super.ninodes;
@@ -198,9 +199,12 @@ int fs_create()
 			blank_inode.direct[i] = 0;
 		}
 		blank_inode.indirect = 0;
+		printf("mounting");
 		//find free inode
 		for(i=1; i<numInodes; i++){
+			printf("createng");
 			if(inodeBitmap[i] == 0){
+				printf("inode num: %d",i);
 				int iBlock = i/127+1;
 				int index = i%127;
 				disk_read(iBlock, block.data);
