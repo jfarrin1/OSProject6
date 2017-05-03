@@ -222,6 +222,7 @@ int fs_create()
 
 int fs_delete( int inumber )
 {
+	if(isMounted){
 	int iBlock = inumber/127 +1;
 	int i,k;
 	int index = inumber%127;
@@ -270,6 +271,7 @@ int fs_delete( int inumber )
 	} else {
 		return 0;
 	}
+	} else { return 0;}
 }
 
 int fs_getsize( int inumber )
@@ -434,10 +436,10 @@ int FreeSpaceLeft(){
 	disk_read(0, block.data);
 	for(i=block.super.ninodeblocks+1; i<block.super.nblocks;i++){
 		if(blockBitmap[i] ==0){
+			printf("block %d is free\n",i);
 			c++;
 		}
 	}
-	printf("total space left: %d\n", c*4096);
 	return (c*4096);
 }
 
@@ -458,6 +460,8 @@ int fs_write( int inumber, const char *data, int length, int offset )
 		 block.inode[index].isvalid=1;
 		}
 		int size = block.inode[index].size;
+		if(size%4096 != 0) freeSpace += DISK_BLOCK_SIZE - size%DISK_BLOCK_SIZE;
+		printf("\ntotal space left: %d\n", freeSpace);
 		int remainToWrite=length;;
 		if (freeSpace > length){
 			printf("you have enough space\n");
@@ -468,6 +472,25 @@ int fs_write( int inumber, const char *data, int length, int offset )
 			block.inode[index].size = size+freeSpace;
 			remainToWrite = freeSpace;
 			length = freeSpace;
+		}
+		//now we know the ending length
+		int start_block_num = size/DISK_BLOCK_SIZE;
+		int end_block_num = (size+length)/DISK_BLOCK_SIZE;
+		if(start_block_num <5 && end_block_num >=5){
+			freeSpace -= 4096;
+			printf("lose 4096 to indirect\n");
+		}
+		if (freeSpace > length){
+			printf("you actually have enough space\n");
+			block.inode[index].size = size+length;
+			remainToWrite = length;
+			printf("remain to write: %d",remainToWrite);
+		} else {
+			printf("still not enough space\n");
+			block.inode[index].size = size+freeSpace;
+			remainToWrite = freeSpace;
+			length = freeSpace;
+			printf("remain to write: %d\n",remainToWrite);
 		}
 		int count=0;
  		int currBlock;
@@ -523,7 +546,7 @@ int fs_write( int inumber, const char *data, int length, int offset )
 			} else {
 				//indirect
 				currBlock -=5;											//set block to be indirect pointer index
-	/*			if(block.inode[index].indirect ==0){
+				if(block.inode[index].indirect ==0){
 					int freeBlock = findFreeBlock();
 					if(freeBlock==-1){										//if no more free blocks, then write whatever we can back to disk
 						disk_write(block_num, block.data);
@@ -532,10 +555,11 @@ int fs_write( int inumber, const char *data, int length, int offset )
 					} else {
 						printf("creating indirect block #: %d\n", freeBlock);
 						block.inode[index].indirect = freeBlock;
-						disk_read(freeBlock, indirectBlock.data);
+						blockBitmap[freeBlock] = 1;
+						indirect_num = freeBlock;
+						disk_read(indirect_num, indirectBlock.data);
 					}
-				}*/
-
+				}
 				int freeBlock = findFreeBlock();
 				if(freeBlock==-1){										//if no more free blocks, then write whatever we can back to disk
 					disk_write(block_num, block.data);
