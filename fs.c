@@ -287,20 +287,34 @@ int fs_getsize( int inumber )
 int fs_read( int inumber, char *data, int length, int offset )
 {
 	int block_num = inumber/127 + 1;
-	printf("inode is in block: %d\n",block_num);
+//	printf("inode is in block: %d\n",block_num);
 	union fs_block block;
 	disk_read(block_num,block.data);
 	int index = inumber%127;
-	int currBlock,i,bytesWeCanRead;
+	int currBlock,i;
+	//int bytesWeCanRead;
 	int count=0;
 	int bytesToRead;
+	int end_point = offset+length;
+	if (block.inode[index].size < end_point) end_point = block.inode[index].size;
+//	int last_block = end_point/4096;
+	int final_block = block.inode[index].size/4096;
+	int block_on = (offset+count)/4096;
+	int endRead = block.inode[index].size-(final_block)*4096;
+//	printf("Last read will read %d bytes\n",endRead);
+	int block_counter = 0;
+//	printf("Total # of blocks to read: %d\n",last_block);
 	int blockOffset = offset/4096; //# of blocks to skip
-	printf("Offset is: %d\n",offset);
-	printf("Due to offset we will skip: %d block(s)\n",blockOffset);
-	int blockReadOffsetIndex = offset%4096;
-	printf("Due to offset, index will start at: %d\n",blockReadOffsetIndex);
+//	printf("Offset is: %d\n",offset);
+//	printf("Due to offset we will skip: %d block(s)\n",blockOffset);
+//	int blockReadOffsetIndex = offset%4096;
+//	printf("Due to offset, index will start at: %d\n",blockReadOffsetIndex);
 	int totalBlocksOffset=0;
-
+	int indirect_block = block.inode[index].indirect;
+	if(offset >= block.inode[index].size)
+	{
+		return 0;
+	}
 	if(block.inode[index].isvalid == 1)
 	{
 		int numBlocks = ceil((double)block.inode[index].size/(double)4096);
@@ -311,22 +325,22 @@ int fs_read( int inumber, char *data, int length, int offset )
 			numDirect = 5;
 			numIndirect = numBlocks -5;
 		}
-		printf("Number of Direct Blocks = %d\n",numDirect);
+//		printf("Number of Direct Blocks = %d\n",numDirect);
 		//go through direct blocks
 		for(i=0;i<numDirect;i++)
 		{
 			disk_read(block_num,block.data);
 			currBlock = block.inode[index].direct[i];
-			printf("Going to direct data block: %d\n",currBlock);
+//			printf("Going to direct data block: %d\n",currBlock);
 			disk_read(currBlock,block.data);
 			if(blockOffset > i)
 			{
-				printf("Skipping block %d due to offset\n",currBlock);
+	//			printf("Skipping block %d due to offset\n",currBlock);
 				totalBlocksOffset++;
 			}
 			else
 			{
-				if(blockOffset == i)
+/*				if(blockOffset == i)
 				{
 					printf("Done skipping blocks, going to read block: %d\n",currBlock);
 					bytesWeCanRead = 4096-blockReadOffsetIndex;
@@ -343,19 +357,72 @@ int fs_read( int inumber, char *data, int length, int offset )
 				}
 				else
 				{
-					printf("Done with offset, going to read block: %d\n",currBlock);
-					bytesToRead = length-count;
-					if(bytesToRead >= 4096)
+*///					printf("Done with offset, going to read block: %d\n",currBlock);
+					block_on = (offset+count)/4096;
+					if(block_on == final_block)
 					{
-						bytesToRead = 4096;
+//						printf("Found last block: %d\n",currBlock);
+						bytesToRead = endRead;
 					}
-					printf("We will read %d bytes from this block\n",bytesToRead);
+					else
+					{
+						bytesToRead = length-count;
+						if(bytesToRead >= 4096)
+						{
+							bytesToRead = 4096;
+						}
+					}
+//					printf("We will read %d bytes from this block\n",bytesToRead);
 					memcpy(data+count,block.data,bytesToRead);
 					count+= bytesToRead;
-					printf("Total bytes read: %d\n",count);
+//					printf("Total bytes read: %d\n",count);
 
-				}
+//				}
 			}
+			block_counter++;
+		}
+		//count indirect blocks
+			disk_read(indirect_block,block.data);
+//		printf("=================================\n");
+//		printf("Going through indirect blocks, # of indirect blocks is: %d\n",numIndirect);
+		for(i=0;i<numIndirect;i++)
+		{
+			disk_read(indirect_block,block.data);
+			currBlock = block.pointers[i];
+//			printf("Going to indirect block: %d\n",currBlock);
+			disk_read(currBlock,block.data);
+			if(blockOffset > totalBlocksOffset)
+			{
+//				printf("Skipping block %d due to offset\n",currBlock);
+				totalBlocksOffset++;
+			}
+			else
+			{
+					block_on = (offset+count)/4096;
+//					printf("Done with offset, going to read block: %d\n",currBlock);
+					bytesToRead = length-count;
+//					printf("length is: %d\n",length);
+//					printf("count is: %d\n",count);
+					if(block_on == final_block)
+					{
+//						printf("Found last block we will read: %d\n",currBlock);
+						bytesToRead = endRead;
+					}
+					else
+					{
+						if(bytesToRead >= 4096)
+						{
+							bytesToRead = 4096;
+						}
+					}
+//					printf("We will read %d bytes from this block\n",bytesToRead);
+					memcpy(data+count,block.data,bytesToRead);
+					count+= bytesToRead;
+//					printf("Total bytes read: %d\n",count);
+
+			}
+			block_counter++;
+
 		}
 		return count;
 	} //done reading inodes
