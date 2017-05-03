@@ -101,7 +101,7 @@ void fs_debug()
 		disk_read(j,block.data);
 		for(i=0; i<128; i++){
 			if(block.inode[i].isvalid ==1){
-				printf("inode: %d\n",i);
+				printf("inode: %d\n",i +(j-1)*127);
 				printf("    size: %d bytes\n",block.inode[i].size);
 				int numBlocks = ceil((double)block.inode[i].size/(double)4096);
 				int numDirect = numBlocks;
@@ -249,6 +249,7 @@ int fs_delete( int inumber )
 		for(k=0; k<numDirect; k++){
 			currBlock = block.inode[index].direct[k];
 			blockBitmap[currBlock] = 0;
+			
 		}
 		if(numIndirect){
 			disk_read(block.inode[index].indirect,block.data);
@@ -427,10 +428,24 @@ int findFreeBlock(){
 	return -1;
 }
 
+int FreeSpaceLeft(){
+	int i,c =0;;
+	union fs_block block;
+	disk_read(0, block.data);
+	for(i=block.super.ninodeblocks+1; i<block.super.nblocks;i++){
+		if(blockBitmap[i] ==0){
+			c++;
+		}
+	}
+	printf("total space left: %d\n", c*4096);
+	return (c*4096);
+}
+
 
 int fs_write( int inumber, const char *data, int length, int offset )
 {
 	if(isMounted){
+		int freeSpace = FreeSpaceLeft();
 		inodeBitmap[inumber] = 1;
 		union fs_block block;
 		union fs_block writeBlock;
@@ -438,10 +453,22 @@ int fs_write( int inumber, const char *data, int length, int offset )
 		int block_num = inumber/127 +1;
 		disk_read(block_num, block.data);
 		int index = inumber%127;
+		if (freeSpace>0 && block.inode[index].isvalid ==0){
+		 block.inode[index].size = 0;
+		 block.inode[index].isvalid=1;
+		}
 		int size = block.inode[index].size;
-		block.inode[index].isvalid =1;
-		block.inode[index].size = size +length;
-		int remainToWrite = length;
+		int remainToWrite=length;;
+		if (freeSpace > length){
+			printf("you have enough space\n");
+			block.inode[index].size = size+length;
+			remainToWrite = length;
+		} else {
+			printf("not enough space\n");
+			block.inode[index].size = size+freeSpace;
+			remainToWrite = freeSpace;
+			length = freeSpace;
+		}
 		int count=0;
  		int currBlock;
 		int bytesToWrite = 4096;
@@ -450,19 +477,21 @@ int fs_write( int inumber, const char *data, int length, int offset )
 		//check if inode block's last data block isn't 100% filled in and fill it in if it isnt
 		int currRemainder = size % DISK_BLOCK_SIZE; 					//how much is left on the last block
 		if(currRemainder !=0){											//there is a partially filled block
+//			int lastUsedBlock = ceil((double)size/(double)DISK_BLOCK_SIZE);
+			bytesToWrite = DISK_BLOCK_SIZE - currRemainder; 
 			int lastUsedBlock = size/DISK_BLOCK_SIZE;
 			if (lastUsedBlock <5){
 				int lastBlock = block.inode[index].direct[lastUsedBlock];
+				printf("Direct Block Index: %d, block #: %d	writing: %d\n",lastUsedBlock,lastBlock,bytesToWrite); 
 				disk_read(lastBlock, writeBlock.data);
-				if(remainToWrite < 4096) bytesToWrite = remainToWrite;	//decide how much to write
 				memcpy(writeBlock.data+currRemainder,data+count+offset,bytesToWrite);		//write to data block
 				disk_write(lastBlock, writeBlock.data);					//write edited block back to disk
 				count += bytesToWrite;									//update count of total written bytes
 				remainToWrite -= bytesToWrite;							//update bytes left to write
 			} else {
 				int lastBlock = indirectBlock.pointers[lastUsedBlock-5];
+				printf("Indirect Block Index: %d, block #: %d	writing: %d\n",lastUsedBlock-5,lastBlock,bytesToWrite); 
 				disk_read(lastBlock, writeBlock.data);
-				if(remainToWrite < 4096) bytesToWrite = remainToWrite;	//decide how much to write
 				memcpy(writeBlock.data+currRemainder,data+count+offset,bytesToWrite);		//write to data block
 				disk_write(lastBlock, writeBlock.data);					//write edited block back to disk
 				count += bytesToWrite;									//update count of total written bytes
@@ -471,7 +500,8 @@ int fs_write( int inumber, const char *data, int length, int offset )
 		}
 //		if(remainToWrite > size-offset) remainToWrite = size-offset;
 		while(remainToWrite >0){
-			int bytesToWrite = 4096;
+			printf("bytes remaining: %d\n", remainToWrite);
+			bytesToWrite = 4096;
 			currBlock = (count+size)/4096;
 			if (currBlock<5){
 				//direct
@@ -485,6 +515,7 @@ int fs_write( int inumber, const char *data, int length, int offset )
 				block.inode[index].direct[currBlock] = freeBlock; 		//set direct pointer to freeBlock
 				disk_read(freeBlock,writeBlock.data);					//read out this free block so we can change data
 				if(remainToWrite < 4096) bytesToWrite = remainToWrite;	//decide how much to write
+				printf("direct block %d, block # %d, bytes: %d\n",currBlock,freeBlock,bytesToWrite);
 				memcpy(writeBlock.data,data+count+offset,bytesToWrite);		//write to data block
 				disk_write(freeBlock, writeBlock.data);					//write edited block back to disk
 				count += bytesToWrite;									//update count of total written bytes
@@ -492,6 +523,19 @@ int fs_write( int inumber, const char *data, int length, int offset )
 			} else {
 				//indirect
 				currBlock -=5;											//set block to be indirect pointer index
+	/*			if(block.inode[index].indirect ==0){
+					int freeBlock = findFreeBlock();
+					if(freeBlock==-1){										//if no more free blocks, then write whatever we can back to disk
+						disk_write(block_num, block.data);
+						disk_write(indirect_num, indirectBlock.data);
+						return count;
+					} else {
+						printf("creating indirect block #: %d\n", freeBlock);
+						block.inode[index].indirect = freeBlock;
+						disk_read(freeBlock, indirectBlock.data);
+					}
+				}*/
+
 				int freeBlock = findFreeBlock();
 				if(freeBlock==-1){										//if no more free blocks, then write whatever we can back to disk
 					disk_write(block_num, block.data);
@@ -501,9 +545,11 @@ int fs_write( int inumber, const char *data, int length, int offset )
 				indirectBlock.pointers[currBlock] = freeBlock;	 		//set indirect pointer to freeBlock
 				disk_read(freeBlock,writeBlock.data);					//read out this free block so we can change data
 				if(remainToWrite < 4096) bytesToWrite = remainToWrite;	//decide how much to write
+				printf("indirect block %d, block # %d, bytes: %d\n",currBlock,freeBlock,bytesToWrite);
 				memcpy(writeBlock.data,data+count+offset,bytesToWrite);	//write to data block
 				disk_write(freeBlock, writeBlock.data);					//write edited block back to disk
 				count += bytesToWrite;									//update count of total written bytes
+				remainToWrite -= bytesToWrite;							//update bytes left to write
 			}
 		}
 		disk_write(block_num, block.data);
