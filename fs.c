@@ -149,6 +149,7 @@ int fs_mount()
 		blockBitmap[0] =1; //superblock
 		int numInodeBlocks = block.super.ninodeblocks;
 		for(j=1; j<=numInodeBlocks; j++){
+			blockBitmap[j] = 1;
 			disk_read(j,block.data);
 			for(i=0; i<128; i++){
 				if(block.inode[i].isvalid ==1){
@@ -164,6 +165,7 @@ int fs_mount()
 						blockBitmap[block.inode[i].direct[k]] = 1;
 					}
 					if(numIndirect){
+						blockBitmap[block.inode[i].indirect] =1;
 						disk_read(block.inode[i].indirect,block.data);
 					}
 					for(k=0; k<numIndirect; k++){
@@ -340,24 +342,7 @@ int fs_read( int inumber, char *data, int length, int offset )
 			}
 			else
 			{
-/*				if(blockOffset == i)
-				{
-					printf("Done skipping blocks, going to read block: %d\n",currBlock);
-					bytesWeCanRead = 4096-blockReadOffsetIndex;
-					bytesToRead = length- count;
-					printf("We can read %d bytes from this block\n",bytesWeCanRead);
-					if(bytesToRead >= bytesWeCanRead)
-					{
-						bytesToRead = bytesWeCanRead;
-					}
-					printf("We will read %d bytes from this block\n",bytesToRead);
-					memcpy(data+count, block.data+blockReadOffsetIndex,bytesToRead);
-					count += bytesToRead;
-					printf("Total bytes read: %d\n",count);
-				}
-				else
-				{
-*///					printf("Done with offset, going to read block: %d\n",currBlock);
+				
 					block_on = (offset+count)/4096;
 					if(block_on == final_block)
 					{
@@ -429,7 +414,104 @@ int fs_read( int inumber, char *data, int length, int offset )
 	return 0;
 }
 
+int findFreeBlock(){
+	int i;
+	union fs_block block;
+	disk_read(0, block.data);
+	for(i=block.super.ninodeblocks+1; i <block.super.nblocks; i++){
+		if(blockBitmap[i] ==0){
+			blockBitmap[i] =1;
+			return i;
+		}
+	}
+	return -1;
+}
+
+
 int fs_write( int inumber, const char *data, int length, int offset )
 {
-	return 0;
+	if(isMounted){
+		inodeBitmap[inumber] = 1;
+		union fs_block block;
+		union fs_block writeBlock;
+		union fs_block indirectBlock;
+		int block_num = inumber/127 +1;
+		disk_read(block_num, block.data);
+		int index = inumber%127;
+		int size = block.inode[index].size;
+		block.inode[index].isvalid =1;
+		block.inode[index].size = size +length;
+		int remainToWrite = length;
+		int count=0;
+ 		int currBlock;
+		int bytesToWrite = 4096;
+		int indirect_num = block.inode[index].indirect;
+		disk_read(indirect_num, indirectBlock.data);		//get indirect block
+		//check if inode block's last data block isn't 100% filled in and fill it in if it isnt
+		int currRemainder = size % DISK_BLOCK_SIZE; 					//how much is left on the last block
+		if(currRemainder !=0){											//there is a partially filled block
+			int lastUsedBlock = size/DISK_BLOCK_SIZE;
+			if (lastUsedBlock <5){
+				int lastBlock = block.inode[index].direct[lastUsedBlock];
+				disk_read(lastBlock, writeBlock.data);
+				if(remainToWrite < 4096) bytesToWrite = remainToWrite;	//decide how much to write
+				memcpy(writeBlock.data+currRemainder,data+count+offset,bytesToWrite);		//write to data block
+				disk_write(lastBlock, writeBlock.data);					//write edited block back to disk
+				count += bytesToWrite;									//update count of total written bytes
+				remainToWrite -= bytesToWrite;							//update bytes left to write
+			} else {
+				int lastBlock = indirectBlock.pointers[lastUsedBlock-5];
+				disk_read(lastBlock, writeBlock.data);
+				if(remainToWrite < 4096) bytesToWrite = remainToWrite;	//decide how much to write
+				memcpy(writeBlock.data+currRemainder,data+count+offset,bytesToWrite);		//write to data block
+				disk_write(lastBlock, writeBlock.data);					//write edited block back to disk
+				count += bytesToWrite;									//update count of total written bytes
+				remainToWrite -= bytesToWrite;							//update bytes left to write
+			}
+		}
+//		if(remainToWrite > size-offset) remainToWrite = size-offset;
+		while(remainToWrite >0){
+			int bytesToWrite = 4096;
+			currBlock = (count+size)/4096;
+			if (currBlock<5){
+				//direct
+				int freeBlock = findFreeBlock();
+				if(freeBlock==-1){										//if no more free blocks, then write whatever we can back to disk
+					printf("free block: %d",freeBlock);
+					disk_write(block_num, block.data);
+					disk_write(indirect_num, indirectBlock.data);
+					return count;
+				}
+				block.inode[index].direct[currBlock] = freeBlock; 		//set direct pointer to freeBlock
+				disk_read(freeBlock,writeBlock.data);					//read out this free block so we can change data
+				if(remainToWrite < 4096) bytesToWrite = remainToWrite;	//decide how much to write
+				memcpy(writeBlock.data,data+count+offset,bytesToWrite);		//write to data block
+				disk_write(freeBlock, writeBlock.data);					//write edited block back to disk
+				count += bytesToWrite;									//update count of total written bytes
+				remainToWrite -= bytesToWrite;							//update bytes left to write
+			} else {
+				//indirect
+				currBlock -=5;											//set block to be indirect pointer index
+				int freeBlock = findFreeBlock();
+				if(freeBlock==-1){										//if no more free blocks, then write whatever we can back to disk
+					disk_write(block_num, block.data);
+					disk_write(indirect_num, indirectBlock.data);
+					return count;
+				}
+				indirectBlock.pointers[currBlock] = freeBlock;	 		//set indirect pointer to freeBlock
+				disk_read(freeBlock,writeBlock.data);					//read out this free block so we can change data
+				if(remainToWrite < 4096) bytesToWrite = remainToWrite;	//decide how much to write
+				memcpy(writeBlock.data,data+count+offset,bytesToWrite);	//write to data block
+				disk_write(freeBlock, writeBlock.data);					//write edited block back to disk
+				count += bytesToWrite;									//update count of total written bytes
+			}
+		}
+		disk_write(block_num, block.data);
+		disk_write(indirect_num, indirectBlock.data);
+		return count;
+	} else {
+		return 0;
+	}
 }
+
+
